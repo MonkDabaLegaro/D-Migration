@@ -31,14 +31,15 @@ D-Migration is intentionally conservative:
 - unsupported migrations are marked manual/non-executable;
 - executable migration follows `preflight -> stage -> switch -> validate -> commit`;
 - staging copies data while preserving the source;
-- validation compares relative paths, file sizes and SHA-256 content hashes;
+- validation compares relative paths, file sizes and SHA-256 content hashes where directory providers are used;
 - source deletion happens only in commit, after configuration and copied contents have been validated;
 - failures after switch trigger automatic rollback during the same `apply` execution;
 - rollback restores the original user configuration or Known Folder path and recreates the source if needed while preserving the destination copy;
 - Known Folders are redirected through the Windows Shell Known Folder API instead of direct registry edits;
 - Known Folders already managed by OneDrive/cloud remain manual;
 - Ollama requires the desktop/runtime process to be closed, validates both stores with isolated temporary runtimes, and compares model names plus digests before commit;
-- WSL remains export/import-only and is not automatically moved yet;
+- WSL 2 uses documented `--export --vhd` / `--import-in-place` flows, validates a temporary imported VHD before unregistering the original, and keeps an independent backup until final validation;
+- WSL 1 remains manual;
 - Visual Studio remains installer-managed and is not automatically moved yet;
 - Docker Desktop remains provider-specific and is not automatically moved yet;
 - administrator elevation is not requested globally.
@@ -82,9 +83,10 @@ Persistent/manual rollback across separate program executions is not enabled yet
 | npm cache | `NPM_CONFIG_CACHE` | Yes |
 | Hugging Face cache | `HF_HOME` | Yes |
 | Ollama models | `OLLAMA_MODELS` + isolated `/api/tags` runtime probe | Yes, when Ollama is closed |
+| WSL 2 distributions | `wsl --export --vhd` + temporary/final `--import-in-place` validation | Yes |
+| WSL 1 distributions | Export/import VHD is not supported | No |
 | pnpm | Dedicated store provider still required | No |
 | Docker Desktop | Dedicated Docker provider required | No |
-| WSL distributions | Export/import provider required | No |
 | Visual Studio | Visual Studio Installer provider required | No |
 | VS Code extensions | Dedicated configuration provider required | No |
 
@@ -93,6 +95,8 @@ For automatic directory migrations D-Migration verifies available destination sp
 For Windows Known Folders, preflight also checks that the plan still matches the path Windows currently reports and rejects OneDrive/cloud-managed locations instead of fighting a sync provider.
 
 For Ollama, preflight refuses to run while Ollama is active. It launches an isolated temporary `ollama serve` against the original store and records the model names/digests returned by `/api/tags`. After staging and setting the user-level `OLLAMA_MODELS`, validation verifies the byte-for-byte copy and launches a second isolated runtime against the destination. The source is deleted only when the destination runtime exposes the same model identities and digests.
+
+For WSL 2, D-Migration treats each distribution as a logical inventory item rather than guessing its internal package/VHD path from undocumented registry state. Staging exports an independent backup VHDX, copies it to a validation VHDX, registers that copy under a temporary distribution name, boots it, and compares user, OS identity and hostname. Only after that succeeds can the original distribution be unregistered. The final VHDX is registered under the original distribution name and the default-distribution selection is restored when applicable. If final import or validation fails, rollback re-registers the retained backup. The backup is removed only at commit. Because backup and validation/final VHDX coexist during the transaction, sufficient temporary free space on the destination is required. WSL 1 remains manual.
 
 ## Default D: layout
 
@@ -116,6 +120,8 @@ D:\
     Databases\
     Docker\
     WSL\
+      <Distribution>\
+        ext4.vhdx
     AI\
       Ollama\
       HuggingFace\
@@ -147,14 +153,14 @@ Set `DMIGRATION_DESTINATION_DRIVE` to use another destination drive.
 | pnpm data | Yes | Manual until store semantics are handled separately |
 | Ollama models | Yes | Transactional configuration change + isolated runtime/digest validation |
 | Hugging Face cache | Yes | Transactional configuration change |
+| WSL distributions | Yes, per distribution | WSL 2 transactional VHD export/import; WSL 1 manual |
 | Docker Desktop data | Yes | Docker-managed data-root migration, manual for now |
-| WSL distributions | Yes | Export/import, manual for now |
 | Visual Studio | Yes | Installer-managed reinstall/configuration, manual for now |
 | VS Code extensions | Yes | Dedicated configuration provider pending |
 
 ## Commands
 
-- `scan`: inventories supported locations and reports size, risk and strategy.
+- `scan`: inventories supported locations and reports size, risk and strategy. WSL distributions report unknown size rather than relying on undocumented VHD paths.
 - `plan`: creates and journals a complete migration review plan without changing the machine.
 - `plan --safe`: creates a journal containing only currently executable provider-backed operations.
 - `doctor`: reports detected development tooling and the strategy required to cleanly relocate it.
