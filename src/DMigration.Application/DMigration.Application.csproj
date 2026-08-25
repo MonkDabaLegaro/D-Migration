@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup><ProjectReference Include="../DMigration.Domain/DMigration.Domain.csproj" /></ItemGroup>
+</Project>

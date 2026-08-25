@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../DMigration.Domain/DMigration.Domain.csproj" />
+    <ProjectReference Include="../DMigration.Application/DMigration.Application.csproj" />
+    <ProjectReference Include="../DMigration.Infrastructure.Windows/DMigration.Infrastructure.Windows.csproj" />
+  </ItemGroup>
+</Project>
