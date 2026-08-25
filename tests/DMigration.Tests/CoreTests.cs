@@ -10,7 +10,7 @@ public sealed class CoreTests
     public void DestinationLayout_MapsPythonIntoLibraries()
     {
         var path = DestinationLayout.For("D:", "python", "pip");
-        Assert.Equal(Path.Combine("D:\", "Librerias", "Python", "pip"), path);
+        Assert.Equal(Path.Combine(@"D:\", "Librerias", "Python", "pip"), path);
     }
 
     [Fact]
