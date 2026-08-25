@@ -11,10 +11,19 @@ var providers = new IInventoryProvider[]
     new DeveloperToolProvider(destinationDrive)
 };
 
+var configuredDirectoryProvider = new ConfiguredDirectoryMigrationProvider(
+    new WindowsConfiguredDirectoryMigrationHost(),
+    [
+        new ConfiguredDirectoryRule("pip-cache", "PIP_CACHE_DIR"),
+        new ConfiguredDirectoryRule("npm-cache", "NPM_CONFIG_CACHE"),
+        new ConfiguredDirectoryRule("huggingface-cache", "HF_HOME"),
+        new ConfiguredDirectoryRule("ollama-models", "OLLAMA_MODELS", ["ollama"])
+    ]);
+
 var inventoryService = new InventoryService(providers);
 var planningService = new PlanningService();
 var journal = new JsonJournalStore(destinationDrive);
-var executionService = new ExecutionService(journal);
+var executionService = new ExecutionService(journal, [configuredDirectoryProvider]);
 var doctorService = new DoctorService();
 
 var command = args.FirstOrDefault()?.ToLowerInvariant() ?? "interactive";
@@ -24,7 +33,7 @@ try
     return command switch
     {
         "scan" => await ScanAsync(),
-        "plan" => await PlanAsync(),
+        "plan" => await PlanAsync(args.Skip(1).ToArray()),
         "doctor" => await DoctorAsync(),
         "apply" => await ApplyAsync(args.Skip(1).ToArray()),
         "rollback" => await RollbackAsync(args.Skip(1).ToArray()),
@@ -47,12 +56,13 @@ async Task<int> InteractiveAsync()
     var choice = AnsiConsole.Prompt(
         new SelectionPrompt<string>()
             .Title("¿Qué deseas hacer?")
-            .AddChoices("Analizar sistema", "Crear plan", "Diagnóstico", "Salir"));
+            .AddChoices("Analizar sistema", "Crear plan completo", "Crear plan seguro ejecutable", "Diagnóstico", "Salir"));
 
     return choice switch
     {
         "Analizar sistema" => await ScanAsync(),
-        "Crear plan" => await PlanAsync(),
+        "Crear plan completo" => await PlanAsync([]),
+        "Crear plan seguro ejecutable" => await PlanAsync(["--safe"]),
         "Diagnóstico" => await DoctorAsync(),
         _ => 0
     };
@@ -65,10 +75,13 @@ async Task<int> ScanAsync()
     return 0;
 }
 
-async Task<int> PlanAsync()
+async Task<int> PlanAsync(string[] commandArgs)
 {
+    var safeOnly = commandArgs.Contains("--safe", StringComparer.OrdinalIgnoreCase);
     var items = await inventoryService.ScanAsync();
-    var plan = planningService.Create(items);
+    var plan = safeOnly
+        ? planningService.CreateExecutableOnly(items)
+        : planningService.Create(items);
     await executionService.DryRunAsync(plan);
 
     var table = new Table().Border(TableBorder.Rounded)
@@ -81,12 +94,16 @@ async Task<int> PlanAsync()
         table.AddRow(
             Markup.Escape(step.Item.Name),
             step.Item.Strategy.ToString(),
-            Markup.Escape(step.Destination ?? "-") ,
+            Markup.Escape(step.Destination ?? "-"),
             step.Item.CanExecute ? "[green]Ejecutable[/]" : "[yellow]Plan/manual[/]");
 
     AnsiConsole.Write(table);
     AnsiConsole.MarkupLine($"Plan guardado: [bold]{plan.Id}[/]");
-    AnsiConsole.MarkupLine("[grey]No se movió ni eliminó ningún archivo.[/]");
+    if (safeOnly)
+        AnsiConsole.MarkupLine($"[green]Plan seguro:[/] {plan.Steps.Count} pasos con provider automático; recuperable estimado {FormatBytes(plan.ReclaimableBytes)}.");
+    else
+        AnsiConsole.MarkupLine("[grey]Plan completo: incluye elementos manuales sólo para revisión.[/]");
+    AnsiConsole.MarkupLine("[grey]Crear el plan no mueve ni elimina archivos.[/]");
     return 0;
 }
 
@@ -127,11 +144,12 @@ async Task<int> ApplyAsync(string[] commandArgs)
 
     if (!execute)
     {
-        AnsiConsole.MarkupLine("[yellow]Dry-run:[/] el plan es válido y permanece sin ejecutar. Usa --execute sólo cuando todos sus providers sean ejecutables.");
+        AnsiConsole.MarkupLine("[yellow]Dry-run:[/] el plan permanece sin ejecutar. Para ejecutar, crea primero `plan --safe` y luego usa `apply <id> --execute`.");
         return 0;
     }
 
-    await executionService.ExecuteAsync(plan);
+    var result = await executionService.ExecuteAsync(plan);
+    AnsiConsole.MarkupLine($"[green]Migración confirmada:[/] {result.Steps.Count(x => x.State == PlanStepState.Committed)} pasos completados.");
     return 0;
 }
 
@@ -144,7 +162,7 @@ async Task<int> RollbackAsync(string[] commandArgs)
         return 2;
     }
 
-    AnsiConsole.MarkupLine("[yellow]Rollback no ejecutado:[/] este incremento aún no habilita mutaciones, por lo tanto no existe estado del sistema que revertir.");
+    AnsiConsole.MarkupLine("[yellow]Rollback manual persistente aún no está habilitado.[/] Durante `apply`, cualquier fallo después del switch activa rollback automático antes de salir.");
     return 0;
 }
 
@@ -180,7 +198,11 @@ static string FormatBytes(long bytes)
 
 static int ShowHelp()
 {
-    AnsiConsole.WriteLine("dmigrate [scan|plan|doctor|apply <plan-id> [--execute]|rollback <plan-id>]");
+    AnsiConsole.WriteLine("dmigrate scan");
+    AnsiConsole.WriteLine("dmigrate plan [--safe]");
+    AnsiConsole.WriteLine("dmigrate doctor");
+    AnsiConsole.WriteLine("dmigrate apply <plan-id> [--execute]");
+    AnsiConsole.WriteLine("dmigrate rollback <plan-id>");
     return 0;
 }
 
