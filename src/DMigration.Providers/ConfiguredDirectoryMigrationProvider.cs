@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using DMigration.Application;
 using DMigration.Domain;
 
@@ -116,10 +117,17 @@ public sealed class ConfiguredDirectoryMigrationProvider(
                 StringComparison.OrdinalIgnoreCase))
             return Result(false, $"{rule.EnvironmentVariable} no quedó configurada con el destino esperado.");
 
-        if (!host.DirectoryContentsMatch(step.Item.SourcePath, destination))
-            return Result(false, "Origen y destino no contienen los mismos archivos y tamaños.");
+        try
+        {
+            if (!host.DirectoryContentsMatch(step.Item.SourcePath, destination))
+                return Result(false, "Origen y destino no coinciden por ruta, tamaño y SHA-256.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Result(false, $"No se pudo verificar integridad: {ex.Message}");
+        }
 
-        return Result(true, "Configuración y copia verificadas.");
+        return Result(true, "Configuración e integridad SHA-256 verificadas.");
     }
 
     public Task<MigrationOperationResult> CommitAsync(
@@ -204,6 +212,8 @@ public sealed class ConfiguredDirectoryMigrationProvider(
 
 public sealed class WindowsConfiguredDirectoryMigrationHost : IConfiguredDirectoryMigrationHost
 {
+    private sealed record FileFingerprint(long Length, string Sha256);
+
     public bool DirectoryExists(string path) => Directory.Exists(path);
 
     public long GetAvailableBytes(string path)
@@ -254,7 +264,7 @@ public sealed class WindowsConfiguredDirectoryMigrationHost : IConfiguredDirecto
         var sourceFiles = Snapshot(source);
         var destinationFiles = Snapshot(destination);
         return sourceFiles.Count == destinationFiles.Count &&
-               sourceFiles.All(x => destinationFiles.TryGetValue(x.Key, out var length) && length == x.Value);
+               sourceFiles.All(x => destinationFiles.TryGetValue(x.Key, out var fingerprint) && fingerprint == x.Value);
     }
 
     public void DeleteDirectory(string path)
@@ -262,10 +272,17 @@ public sealed class WindowsConfiguredDirectoryMigrationHost : IConfiguredDirecto
         if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
     }
 
-    private static Dictionary<string, long> Snapshot(string root) =>
+    private static Dictionary<string, FileFingerprint> Snapshot(string root) =>
         Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
             .ToDictionary(
                 file => Path.GetRelativePath(root, file),
-                file => new FileInfo(file).Length,
+                Fingerprint,
                 StringComparer.OrdinalIgnoreCase);
+
+    private static FileFingerprint Fingerprint(string file)
+    {
+        using var stream = File.Open(file, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var hash = SHA256.HashData(stream);
+        return new FileFingerprint(stream.Length, Convert.ToHexString(hash));
+    }
 }
