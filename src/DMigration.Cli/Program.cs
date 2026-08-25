@@ -16,8 +16,7 @@ var configuredDirectoryProvider = new ConfiguredDirectoryMigrationProvider(
     [
         new ConfiguredDirectoryRule("pip-cache", "PIP_CACHE_DIR"),
         new ConfiguredDirectoryRule("npm-cache", "NPM_CONFIG_CACHE"),
-        new ConfiguredDirectoryRule("huggingface-cache", "HF_HOME"),
-        new ConfiguredDirectoryRule("ollama-models", "OLLAMA_MODELS", ["ollama"])
+        new ConfiguredDirectoryRule("huggingface-cache", "HF_HOME")
     ]);
 
 var inventoryService = new InventoryService(providers);
