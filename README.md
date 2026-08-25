@@ -10,7 +10,7 @@ The project is being rebuilt as a modular .NET 10 CLI. It inventories user data 
 src/
   DMigration.Domain/                  Core records, policies and destination layout
   DMigration.Application/             Inventory, planning, doctor and execution use-cases
-  DMigration.Infrastructure.Windows/  Windows known folders, filesystem and journal adapters
+  DMigration.Infrastructure.Windows/  Windows Known Folder APIs, filesystem and journal adapters
   DMigration.Providers/               Developer-tool discovery and migration providers
   DMigration.Cli/                     Composition root and terminal UI
 
@@ -34,7 +34,9 @@ D-Migration is intentionally conservative:
 - validation compares relative paths, file sizes and SHA-256 content hashes;
 - source deletion happens only in commit, after configuration and copied contents have been validated;
 - failures after switch trigger automatic rollback during the same `apply` execution;
-- rollback restores the original user configuration and recreates the source if needed while preserving the destination copy;
+- rollback restores the original user configuration or Known Folder path and recreates the source if needed while preserving the destination copy;
+- Known Folders are redirected through the Windows Shell Known Folder API instead of direct registry edits;
+- Known Folders already managed by OneDrive/cloud remain manual;
 - WSL remains export/import-only and is not automatically moved yet;
 - Visual Studio remains installer-managed and is not automatically moved yet;
 - Docker Desktop remains provider-specific and is not automatically moved yet;
@@ -67,12 +69,15 @@ Useful commands:
 
 Persistent/manual rollback across separate program executions is not enabled yet. Automatic rollback during the active `apply` transaction is enabled.
 
-## First executable providers
+## Executable providers
 
-The first real migration provider handles regenerable caches whose owning tool supports a user-level environment variable for relocating its data:
-
-| Item | Configuration switched by D-Migration | Automatic |
+| Item | Configuration / Windows mechanism | Automatic |
 |---|---|---:|
+| Downloads | Windows Known Folder API | Yes, unless cloud-managed |
+| Documents | Windows Known Folder API | Yes, unless cloud-managed |
+| Pictures | Windows Known Folder API | Yes, unless cloud-managed |
+| Videos | Windows Known Folder API | Yes, unless cloud-managed |
+| Music | Windows Known Folder API | Yes, unless cloud-managed |
 | pip cache | `PIP_CACHE_DIR` | Yes |
 | npm cache | `NPM_CONFIG_CACHE` | Yes |
 | Hugging Face cache | `HF_HOME` | Yes |
@@ -83,7 +88,9 @@ The first real migration provider handles regenerable caches whose owning tool s
 | Visual Studio | Visual Studio Installer provider required | No |
 | VS Code extensions | Dedicated configuration provider required | No |
 
-For an automatic directory migration D-Migration verifies available destination space, refuses a pre-existing destination, copies without deleting the source, changes the owning configuration, verifies each copied file by relative path, length and SHA-256 hash, and only then removes the source.
+For automatic directory migrations D-Migration verifies available destination space, refuses a pre-existing destination, copies without deleting the source, switches the owning configuration/path, verifies each copied file by relative path, length and SHA-256 hash, and only then removes the source.
+
+For Windows Known Folders, preflight also checks that the plan still matches the path Windows currently reports and rejects OneDrive/cloud-managed locations instead of fighting a sync provider.
 
 ## Default D: layout
 
@@ -113,6 +120,8 @@ D:\
   Descargas\
   Documentos\
   Fotos y videos\
+    Fotos\
+    Videos\
   Musica\
   Games\
   .d-migration\
@@ -122,13 +131,15 @@ D:\
     state\
 ```
 
+Pictures and Videos intentionally use separate subdirectories so the two Windows Known Folders never share a destination or rollback boundary.
+
 Set `DMIGRATION_DESTINATION_DRIVE` to use another destination drive.
 
 ## Detection coverage
 
 | Area | Detection | Strategy |
 |---|---|---|
-| Downloads/Documents/Pictures/Videos/Music | Yes | Windows known-folder redirect, manual for now |
+| Downloads/Documents/Pictures/Videos/Music | Yes | Transactional Windows Known Folder redirect; cloud-managed paths remain manual |
 | pip cache | Yes | Transactional configuration change |
 | npm cache | Yes | Transactional configuration change |
 | pnpm data | Yes | Manual until store semantics are handled separately |
