@@ -8,6 +8,18 @@ public interface IInventoryProvider
     Task<IReadOnlyList<InventoryItem>> ScanAsync(CancellationToken cancellationToken = default);
 }
 
+public sealed record MigrationOperationResult(bool Success, string Message);
+
+public interface IMigrationProvider
+{
+    string Name { get; }
+    bool CanHandle(InventoryItem item);
+    Task<MigrationOperationResult> PreflightAsync(MigrationStep step, CancellationToken cancellationToken = default);
+    Task<MigrationOperationResult> ExecuteAsync(MigrationStep step, CancellationToken cancellationToken = default);
+    Task<MigrationOperationResult> ValidateAsync(MigrationStep step, CancellationToken cancellationToken = default);
+    Task<MigrationOperationResult> RollbackAsync(MigrationStep step, CancellationToken cancellationToken = default);
+}
+
 public interface IJournalStore
 {
     Task SaveAsync(MigrationPlan plan, CancellationToken cancellationToken = default);
@@ -61,19 +73,63 @@ public sealed class DoctorService
     }
 }
 
-public sealed class ExecutionService(IJournalStore journal)
+public sealed class ExecutionService(IJournalStore journal, IEnumerable<IMigrationProvider>? migrationProviders = null)
 {
+    private readonly IReadOnlyList<IMigrationProvider> _migrationProviders = migrationProviders?.ToArray() ?? [];
+
     public async Task<MigrationPlan> DryRunAsync(MigrationPlan plan, CancellationToken cancellationToken = default)
     {
         await journal.SaveAsync(plan, cancellationToken);
         return plan;
     }
 
-    public Task<MigrationPlan> ExecuteAsync(MigrationPlan plan, CancellationToken cancellationToken = default)
+    public async Task<MigrationPlan> ExecuteAsync(MigrationPlan plan, CancellationToken cancellationToken = default)
     {
         if (plan.Steps.Any(x => !x.Item.CanExecute))
             throw new InvalidOperationException("El plan contiene operaciones que requieren intervención manual o un provider específico todavía no ejecutable.");
 
-        throw new NotSupportedException("La ejecución destructiva permanece deshabilitada hasta que cada provider implemente preflight, validación y rollback.");
+        var current = plan;
+        for (var index = 0; index < current.Steps.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var step = current.Steps[index];
+            var provider = _migrationProviders.FirstOrDefault(x => x.CanHandle(step.Item))
+                ?? throw new InvalidOperationException($"No existe migration provider ejecutable para {step.Item.Name}.");
+
+            var preflight = await provider.PreflightAsync(step, cancellationToken);
+            if (!preflight.Success)
+                throw new InvalidOperationException($"Preflight falló para {step.Item.Name}: {preflight.Message}");
+
+            current = ReplaceStep(current, index, step with { State = PlanStepState.PreflightPassed });
+            await journal.SaveAsync(current, cancellationToken);
+
+            var execution = await provider.ExecuteAsync(current.Steps[index], cancellationToken);
+            if (!execution.Success)
+                throw new InvalidOperationException($"Ejecución falló para {step.Item.Name}: {execution.Message}");
+
+            current = ReplaceStep(current, index, current.Steps[index] with { State = PlanStepState.Switched });
+            await journal.SaveAsync(current, cancellationToken);
+
+            var validation = await provider.ValidateAsync(current.Steps[index], cancellationToken);
+            if (!validation.Success)
+            {
+                await provider.RollbackAsync(current.Steps[index], cancellationToken);
+                current = ReplaceStep(current, index, current.Steps[index] with { State = PlanStepState.RolledBack });
+                await journal.SaveAsync(current, cancellationToken);
+                throw new InvalidOperationException($"Validación falló para {step.Item.Name}; se solicitó rollback: {validation.Message}");
+            }
+
+            current = ReplaceStep(current, index, current.Steps[index] with { State = PlanStepState.Committed });
+            await journal.SaveAsync(current, cancellationToken);
+        }
+
+        return current;
+    }
+
+    private static MigrationPlan ReplaceStep(MigrationPlan plan, int index, MigrationStep replacement)
+    {
+        var steps = plan.Steps.ToArray();
+        steps[index] = replacement;
+        return plan with { Steps = steps };
     }
 }
