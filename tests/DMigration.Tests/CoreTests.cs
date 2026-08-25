@@ -35,6 +35,17 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public void PlanningService_CreateExecutableOnly_LeavesManualItemsOut()
+    {
+        var executable = new InventoryItem("a", "p", "A", "C:\\A", 100, "python", RiskLevel.Low, MigrationStrategy.ConfigurationChange, "D:\\A", true, "");
+        var manual = new InventoryItem("b", "p", "B", "C:\\B", 200, "wsl", RiskLevel.High, MigrationStrategy.ExportImport, "D:\\B", false, "");
+
+        var plan = new PlanningService().CreateExecutableOnly([executable, manual]);
+
+        Assert.Equal("a", Assert.Single(plan.Steps).Item.Id);
+    }
+
+    [Fact]
     public void ReclaimableBytes_CountsOnlyExecutableSteps()
     {
         var executable = new InventoryItem("a", "p", "A", "C:\\A", 100, "python", RiskLevel.Low, MigrationStrategy.ConfigurationChange, "D:\\A", true, "");
