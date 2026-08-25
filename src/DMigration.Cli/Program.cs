@@ -5,10 +5,12 @@ using DMigration.Providers;
 using Spectre.Console;
 
 var destinationDrive = Environment.GetEnvironmentVariable("DMIGRATION_DESTINATION_DRIVE") ?? "D:";
+var wslHost = new WindowsWslMigrationHost();
 var providers = new IInventoryProvider[]
 {
     new WindowsKnownFolderProvider(destinationDrive),
-    new DeveloperToolProvider(destinationDrive)
+    new DeveloperToolProvider(destinationDrive),
+    new WslInventoryProvider(wslHost, destinationDrive)
 };
 
 var configuredDirectoryProvider = new ConfiguredDirectoryMigrationProvider(
@@ -30,11 +32,12 @@ var knownFolderProvider = new KnownFolderMigrationProvider(
     ]);
 
 var ollamaProvider = new OllamaMigrationProvider(new WindowsOllamaMigrationHost());
+var wslMigrationProvider = new WslMigrationProvider(wslHost);
 
 var inventoryService = new InventoryService(providers);
 var planningService = new PlanningService();
 var journal = new JsonJournalStore(destinationDrive);
-var executionService = new ExecutionService(journal, [configuredDirectoryProvider, knownFolderProvider, ollamaProvider]);
+var executionService = new ExecutionService(journal, [configuredDirectoryProvider, knownFolderProvider, ollamaProvider, wslMigrationProvider]);
 var doctorService = new DoctorService();
 
 var command = args.FirstOrDefault()?.ToLowerInvariant() ?? "interactive";
@@ -189,7 +192,7 @@ void RenderInventory(IReadOnlyList<InventoryItem> items)
     foreach (var item in items)
         table.AddRow(
             Markup.Escape(item.Name),
-            FormatBytes(item.SizeBytes),
+            item.SizeBytes == 0 && item.SourcePath.StartsWith("wsl://", StringComparison.OrdinalIgnoreCase) ? "desconocido" : FormatBytes(item.SizeBytes),
             item.Risk.ToString(),
             item.Strategy.ToString(),
             Markup.Escape(item.SourcePath));
