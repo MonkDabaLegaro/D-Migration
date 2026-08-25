@@ -59,6 +59,30 @@ public sealed class ConfiguredDirectoryMigrationProviderTests
         Assert.True(host.Directories.ContainsKey(@"D:\Datos\AI\Ollama"));
     }
 
+    [Fact]
+    public void WindowsHost_DirectoryContentsMatch_RejectsSameLengthDifferentContent()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"dmigration-hash-{Guid.NewGuid():N}");
+        var source = Path.Combine(root, "source");
+        var destination = Path.Combine(root, "destination");
+        Directory.CreateDirectory(source);
+        Directory.CreateDirectory(destination);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(source, "payload.bin"), "AAAA");
+            File.WriteAllText(Path.Combine(destination, "payload.bin"), "BBBB");
+
+            var host = new WindowsConfiguredDirectoryMigrationHost();
+
+            Assert.False(host.DirectoryContentsMatch(source, destination));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static InventoryItem Item(string id, string source, string destination) => new(
         id,
         "developer-tools",
