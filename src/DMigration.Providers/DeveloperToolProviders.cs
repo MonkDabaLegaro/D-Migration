@@ -23,7 +23,6 @@ public sealed class DeveloperToolProvider(string destinationDrive = "D:") : IInv
         if (OperatingSystem.IsWindows())
         {
             AddPath(items, "docker-desktop", "Docker Desktop data", Path.Combine(local, "Docker"), "docker", RiskLevel.Medium, MigrationStrategy.DataRootMigration, "Docker", "La imagen de disco debe reubicarse mediante mecanismos soportados por Docker Desktop.");
-            AddPath(items, "wsl-data", "WSL distributions", Path.Combine(local, "Packages"), "wsl", RiskLevel.High, MigrationStrategy.ExportImport, "WSL", "Nunca mover VHDX directamente; usar export/import o import-in-place según corresponda.", includeOnlyWhen: ContainsWslData);
 
             var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
             AddPath(items, "visual-studio", "Visual Studio", Path.Combine(programFiles, "Microsoft Visual Studio"), "ide", RiskLevel.Medium, MigrationStrategy.ApplicationReinstall, "VisualStudio", "Instalación administrada por Visual Studio Installer; conservar workloads/configuración y reinstalar con rutas soportadas.");
@@ -42,12 +41,10 @@ public sealed class DeveloperToolProvider(string destinationDrive = "D:") : IInv
             MigrationStrategy strategy,
             string destinationName,
             string notes,
-            bool canExecute = false,
-            Func<string, bool>? includeOnlyWhen = null)
+            bool canExecute = false)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
-            if (includeOnlyWhen is not null && !includeOnlyWhen(path)) return;
 
             target.Add(new InventoryItem(
                 id,
@@ -62,15 +59,5 @@ public sealed class DeveloperToolProvider(string destinationDrive = "D:") : IInv
                 canExecute,
                 notes));
         }
-    }
-
-    private static bool ContainsWslData(string packagesRoot)
-    {
-        try
-        {
-            return Directory.EnumerateFiles(packagesRoot, "ext4.vhdx", SearchOption.AllDirectories).Any();
-        }
-        catch (UnauthorizedAccessException) { return false; }
-        catch (IOException) { return false; }
     }
 }
