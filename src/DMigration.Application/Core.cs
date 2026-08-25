@@ -15,8 +15,10 @@ public interface IMigrationProvider
     string Name { get; }
     bool CanHandle(InventoryItem item);
     Task<MigrationOperationResult> PreflightAsync(MigrationStep step, CancellationToken cancellationToken = default);
-    Task<MigrationOperationResult> ExecuteAsync(MigrationStep step, CancellationToken cancellationToken = default);
+    Task<MigrationOperationResult> StageAsync(MigrationStep step, CancellationToken cancellationToken = default);
+    Task<MigrationOperationResult> SwitchAsync(MigrationStep step, CancellationToken cancellationToken = default);
     Task<MigrationOperationResult> ValidateAsync(MigrationStep step, CancellationToken cancellationToken = default);
+    Task<MigrationOperationResult> CommitAsync(MigrationStep step, CancellationToken cancellationToken = default);
     Task<MigrationOperationResult> RollbackAsync(MigrationStep step, CancellationToken cancellationToken = default);
 }
 
@@ -96,34 +98,51 @@ public sealed class ExecutionService(IJournalStore journal, IEnumerable<IMigrati
             var provider = _migrationProviders.FirstOrDefault(x => x.CanHandle(step.Item))
                 ?? throw new InvalidOperationException($"No existe migration provider ejecutable para {step.Item.Name}.");
 
-            var preflight = await provider.PreflightAsync(step, cancellationToken);
-            if (!preflight.Success)
-                throw new InvalidOperationException($"Preflight falló para {step.Item.Name}: {preflight.Message}");
-
+            await RunRequiredAsync("Preflight", provider.PreflightAsync(step, cancellationToken), step);
             current = ReplaceStep(current, index, step with { State = PlanStepState.PreflightPassed });
             await journal.SaveAsync(current, cancellationToken);
 
-            var execution = await provider.ExecuteAsync(current.Steps[index], cancellationToken);
-            if (!execution.Success)
-                throw new InvalidOperationException($"Ejecución falló para {step.Item.Name}: {execution.Message}");
-
-            current = ReplaceStep(current, index, current.Steps[index] with { State = PlanStepState.Switched });
+            await RunRequiredAsync("Staging", provider.StageAsync(current.Steps[index], cancellationToken), step);
+            current = ReplaceStep(current, index, current.Steps[index] with { State = PlanStepState.Staged });
             await journal.SaveAsync(current, cancellationToken);
 
-            var validation = await provider.ValidateAsync(current.Steps[index], cancellationToken);
-            if (!validation.Success)
+            try
             {
-                await provider.RollbackAsync(current.Steps[index], cancellationToken);
-                current = ReplaceStep(current, index, current.Steps[index] with { State = PlanStepState.RolledBack });
+                await RunRequiredAsync("Switch", provider.SwitchAsync(current.Steps[index], cancellationToken), step);
+                current = ReplaceStep(current, index, current.Steps[index] with { State = PlanStepState.Switched });
                 await journal.SaveAsync(current, cancellationToken);
-                throw new InvalidOperationException($"Validación falló para {step.Item.Name}; se solicitó rollback: {validation.Message}");
-            }
 
-            current = ReplaceStep(current, index, current.Steps[index] with { State = PlanStepState.Committed });
-            await journal.SaveAsync(current, cancellationToken);
+                var validation = await provider.ValidateAsync(current.Steps[index], cancellationToken);
+                if (!validation.Success)
+                    throw new InvalidOperationException($"Validación falló para {step.Item.Name}: {validation.Message}");
+
+                current = ReplaceStep(current, index, current.Steps[index] with { State = PlanStepState.Validated });
+                await journal.SaveAsync(current, cancellationToken);
+
+                await RunRequiredAsync("Commit", provider.CommitAsync(current.Steps[index], cancellationToken), step);
+                current = ReplaceStep(current, index, current.Steps[index] with { State = PlanStepState.Committed });
+                await journal.SaveAsync(current, cancellationToken);
+            }
+            catch
+            {
+                var rollback = await provider.RollbackAsync(current.Steps[index], cancellationToken);
+                current = ReplaceStep(
+                    current,
+                    index,
+                    current.Steps[index] with { State = rollback.Success ? PlanStepState.RolledBack : PlanStepState.Failed });
+                await journal.SaveAsync(current, cancellationToken);
+                throw;
+            }
         }
 
         return current;
+    }
+
+    private static async Task RunRequiredAsync(string phase, Task<MigrationOperationResult> operation, MigrationStep step)
+    {
+        var result = await operation;
+        if (!result.Success)
+            throw new InvalidOperationException($"{phase} falló para {step.Item.Name}: {result.Message}");
     }
 
     private static MigrationPlan ReplaceStep(MigrationPlan plan, int index, MigrationStep replacement)
