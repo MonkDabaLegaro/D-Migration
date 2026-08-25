@@ -29,10 +29,12 @@ var knownFolderProvider = new KnownFolderMigrationProvider(
         new KnownFolderRule("music", KnownFolderIds.Music)
     ]);
 
+var ollamaProvider = new OllamaMigrationProvider(new WindowsOllamaMigrationHost());
+
 var inventoryService = new InventoryService(providers);
 var planningService = new PlanningService();
 var journal = new JsonJournalStore(destinationDrive);
-var executionService = new ExecutionService(journal, [configuredDirectoryProvider, knownFolderProvider]);
+var executionService = new ExecutionService(journal, [configuredDirectoryProvider, knownFolderProvider, ollamaProvider]);
 var doctorService = new DoctorService();
 
 var command = args.FirstOrDefault()?.ToLowerInvariant() ?? "interactive";
