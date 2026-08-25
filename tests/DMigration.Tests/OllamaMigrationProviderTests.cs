@@ -79,7 +79,7 @@ public sealed class OllamaMigrationProviderTests
         var result = await new OllamaMigrationProvider(host).PreflightAsync(Step());
 
         Assert.False(result.Success);
-        Assert.Contains("cerr", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Cierra Ollama", result.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(host.ProbedPaths);
     }
 
