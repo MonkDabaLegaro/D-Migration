@@ -46,10 +46,15 @@ public sealed class InventoryService(IEnumerable<IInventoryProvider> providers)
 
 public sealed class PlanningService
 {
-    public MigrationPlan Create(IEnumerable<InventoryItem> items)
+    public MigrationPlan Create(IEnumerable<InventoryItem> items) =>
+        CreateCore(items.Where(x => x.Strategy is not MigrationStrategy.Protected));
+
+    public MigrationPlan CreateExecutableOnly(IEnumerable<InventoryItem> items) =>
+        CreateCore(items.Where(x => x.CanExecute && x.Strategy is not MigrationStrategy.Protected));
+
+    private static MigrationPlan CreateCore(IEnumerable<InventoryItem> items)
     {
         var steps = items
-            .Where(x => x.Strategy is not MigrationStrategy.Protected)
             .Select(x => new MigrationStep(Guid.NewGuid().ToString("N"), x, x.RecommendedDestination))
             .ToArray();
 
