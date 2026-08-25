@@ -37,10 +37,10 @@ D-Migration is intentionally conservative:
 - rollback restores the original user configuration or Known Folder path and recreates the source if needed while preserving the destination copy;
 - Known Folders are redirected through the Windows Shell Known Folder API instead of direct registry edits;
 - Known Folders already managed by OneDrive/cloud remain manual;
+- Ollama requires the desktop/runtime process to be closed, validates both stores with isolated temporary runtimes, and compares model names plus digests before commit;
 - WSL remains export/import-only and is not automatically moved yet;
 - Visual Studio remains installer-managed and is not automatically moved yet;
 - Docker Desktop remains provider-specific and is not automatically moved yet;
-- Ollama remains manual until its provider validates the runtime against the relocated model store;
 - administrator elevation is not requested globally.
 
 ## Quick start
@@ -81,7 +81,7 @@ Persistent/manual rollback across separate program executions is not enabled yet
 | pip cache | `PIP_CACHE_DIR` | Yes |
 | npm cache | `NPM_CONFIG_CACHE` | Yes |
 | Hugging Face cache | `HF_HOME` | Yes |
-| Ollama models | `OLLAMA_MODELS`; runtime validation still required | No |
+| Ollama models | `OLLAMA_MODELS` + isolated `/api/tags` runtime probe | Yes, when Ollama is closed |
 | pnpm | Dedicated store provider still required | No |
 | Docker Desktop | Dedicated Docker provider required | No |
 | WSL distributions | Export/import provider required | No |
@@ -91,6 +91,8 @@ Persistent/manual rollback across separate program executions is not enabled yet
 For automatic directory migrations D-Migration verifies available destination space, refuses a pre-existing destination, copies without deleting the source, switches the owning configuration/path, verifies each copied file by relative path, length and SHA-256 hash, and only then removes the source.
 
 For Windows Known Folders, preflight also checks that the plan still matches the path Windows currently reports and rejects OneDrive/cloud-managed locations instead of fighting a sync provider.
+
+For Ollama, preflight refuses to run while Ollama is active. It launches an isolated temporary `ollama serve` against the original store and records the model names/digests returned by `/api/tags`. After staging and setting the user-level `OLLAMA_MODELS`, validation verifies the byte-for-byte copy and launches a second isolated runtime against the destination. The source is deleted only when the destination runtime exposes the same model identities and digests.
 
 ## Default D: layout
 
@@ -143,7 +145,7 @@ Set `DMIGRATION_DESTINATION_DRIVE` to use another destination drive.
 | pip cache | Yes | Transactional configuration change |
 | npm cache | Yes | Transactional configuration change |
 | pnpm data | Yes | Manual until store semantics are handled separately |
-| Ollama models | Yes | Configuration change plus runtime probe, manual for now |
+| Ollama models | Yes | Transactional configuration change + isolated runtime/digest validation |
 | Hugging Face cache | Yes | Transactional configuration change |
 | Docker Desktop data | Yes | Docker-managed data-root migration, manual for now |
 | WSL distributions | Yes | Export/import, manual for now |
