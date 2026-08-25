@@ -30,18 +30,16 @@ D-Migration is intentionally conservative:
 - dry-run is the default behavior;
 - unsupported migrations are marked manual/non-executable;
 - executable migration follows `preflight -> stage -> switch -> validate -> commit`;
-- staging copies data while preserving the source;
-- validation compares relative paths, file sizes and SHA-256 content hashes where directory providers are used;
-- source deletion happens only in commit, after configuration and copied contents have been validated;
+- staging preserves the source;
+- source deletion happens only in commit after validation;
 - failures after switch trigger automatic rollback during the same `apply` execution;
-- rollback restores the original user configuration or Known Folder path and recreates the source if needed while preserving the destination copy;
-- Known Folders are redirected through the Windows Shell Known Folder API instead of direct registry edits;
-- Known Folders already managed by OneDrive/cloud remain manual;
-- Ollama requires the desktop/runtime process to be closed, validates both stores with isolated temporary runtimes, and compares model names plus digests before commit;
-- WSL 2 uses documented `--export --vhd` / `--import-in-place` flows, validates a temporary imported VHD before unregistering the original, and keeps an independent backup until final validation;
+- Known Folders use the Windows Shell API and cloud-managed folders remain manual;
+- Ollama validates model names/digests with isolated runtimes before commit;
+- WSL 2 validates an imported backup before unregistering the original and keeps a backup through final validation;
 - WSL 1 remains manual;
-- Visual Studio remains installer-managed and is not automatically moved yet;
-- Docker Desktop remains provider-specific and is not automatically moved yet;
+- Docker Desktop WSL2 is detected by a dedicated provider, but existing installations remain assisted/manual unless Docker exposes a supported programmatic relocation channel;
+- Docker configuration internals such as undocumented `settings-store.json` keys are never treated as a public API;
+- Visual Studio remains installer-managed;
 - administrator elevation is not requested globally.
 
 ## Quick start
@@ -54,8 +52,6 @@ cd D-Migration
 .\run.ps1
 ```
 
-Useful commands:
-
 ```powershell
 .\run.ps1 scan
 .\run.ps1 plan
@@ -66,37 +62,32 @@ Useful commands:
 .\run.ps1 rollback <plan-id>
 ```
 
-`plan` creates a complete review plan including manual items. `plan --safe` creates a separate plan containing only items that currently have an executable migration provider. `apply` is still a dry-run unless `--execute` is explicitly supplied.
+`plan` includes manual review items. `plan --safe` contains only provider-backed operations that the current host declares executable. `apply` remains dry-run unless `--execute` is explicitly supplied.
 
-Persistent/manual rollback across separate program executions is not enabled yet. Automatic rollback during the active `apply` transaction is enabled.
+## Provider status
 
-## Executable providers
-
-| Item | Configuration / Windows mechanism | Automatic |
+| Item | Mechanism | Automatic |
 |---|---|---:|
-| Downloads | Windows Known Folder API | Yes, unless cloud-managed |
-| Documents | Windows Known Folder API | Yes, unless cloud-managed |
-| Pictures | Windows Known Folder API | Yes, unless cloud-managed |
-| Videos | Windows Known Folder API | Yes, unless cloud-managed |
-| Music | Windows Known Folder API | Yes, unless cloud-managed |
+| Downloads/Documents/Pictures/Videos/Music | Windows Known Folder API | Yes, unless cloud-managed |
 | pip cache | `PIP_CACHE_DIR` | Yes |
 | npm cache | `NPM_CONFIG_CACHE` | Yes |
 | Hugging Face cache | `HF_HOME` | Yes |
-| Ollama models | `OLLAMA_MODELS` + isolated `/api/tags` runtime probe | Yes, when Ollama is closed |
+| Ollama models | `OLLAMA_MODELS` + isolated `/api/tags` probe | Yes, when Ollama is closed |
 | WSL 2 distributions | `wsl --export --vhd` + temporary/final `--import-in-place` validation | Yes |
-| WSL 1 distributions | Export/import VHD is not supported | No |
-| pnpm | Dedicated store provider still required | No |
-| Docker Desktop | Dedicated Docker provider required | No |
-| Visual Studio | Visual Studio Installer provider required | No |
-| VS Code extensions | Dedicated configuration provider required | No |
+| WSL 1 distributions | VHD workflow unsupported | No |
+| pnpm | Dedicated store semantics pending | No |
+| Docker Desktop WSL2 | Dedicated backend/data-root provider + runtime inventory contract | Assisted on current Windows host |
+| Docker Desktop Hyper-V | Backend-specific provider pending | No |
+| Visual Studio | Visual Studio Installer provider pending | No |
+| VS Code extensions | Dedicated provider pending | No |
 
-For automatic directory migrations D-Migration verifies available destination space, refuses a pre-existing destination, copies without deleting the source, switches the owning configuration/path, verifies each copied file by relative path, length and SHA-256 hash, and only then removes the source.
+### Docker Desktop safety boundary
 
-For Windows Known Folders, preflight also checks that the plan still matches the path Windows currently reports and rejects OneDrive/cloud-managed locations instead of fighting a sync provider.
+Docker Desktop documents changing **Disk image location** from `Settings > Resources > Advanced`, and documents `--wsl-default-data-root` for installer-time configuration. It does not document a stable contract for mutating the corresponding setting of an existing installation by editing `settings-store.json` directly.
 
-For Ollama, preflight refuses to run while Ollama is active. It launches an isolated temporary `ollama serve` against the original store and records the model names/digests returned by `/api/tags`. After staging and setting the user-level `OLLAMA_MODELS`, validation verifies the byte-for-byte copy and launches a second isolated runtime against the destination. The source is deleted only when the destination runtime exposes the same model identities and digests.
+D-Migration therefore detects Docker Desktop WSL2 and its default `%LOCALAPPDATA%\Docker\wsl` data root, assigns the target `D:\Datos\Docker\wsl`, and reports the migration as assisted/manual on the production Windows host. It is deliberately excluded from `plan --safe` while no supported relocation API is available.
 
-For WSL 2, D-Migration treats each distribution as a logical inventory item rather than guessing its internal package/VHD path from undocumented registry state. Staging exports an independent backup VHDX, copies it to a validation VHDX, registers that copy under a temporary distribution name, boots it, and compares user, OS identity and hostname. Only after that succeeds can the original distribution be unregistered. The final VHDX is registered under the original distribution name and the default-distribution selection is restored when applicable. If final import or validation fails, rollback re-registers the retained backup. The backup is removed only at commit. Because backup and validation/final VHDX coexist during the transaction, sufficient temporary free space on the destination is required. WSL 1 remains manual.
+The Docker provider contract and tests already define the future executable lifecycle: capture image/volume inventory while stopped, stage without deleting the source, relocate through a supported host operation, start Docker and wait for the engine, compare image and volume identities, and only then remove the old data root. A missing image or volume fails validation and preserves the source. This contract is not enabled by faking an undocumented settings mutation.
 
 ## Default D: layout
 
@@ -119,6 +110,7 @@ D:\
   Datos\
     Databases\
     Docker\
+      wsl\
     WSL\
       <Distribution>\
         ext4.vhdx
@@ -139,34 +131,17 @@ D:\
     state\
 ```
 
-Pictures and Videos intentionally use separate subdirectories so the two Windows Known Folders never share a destination or rollback boundary.
-
 Set `DMIGRATION_DESTINATION_DRIVE` to use another destination drive.
-
-## Detection coverage
-
-| Area | Detection | Strategy |
-|---|---|---|
-| Downloads/Documents/Pictures/Videos/Music | Yes | Transactional Windows Known Folder redirect; cloud-managed paths remain manual |
-| pip cache | Yes | Transactional configuration change |
-| npm cache | Yes | Transactional configuration change |
-| pnpm data | Yes | Manual until store semantics are handled separately |
-| Ollama models | Yes | Transactional configuration change + isolated runtime/digest validation |
-| Hugging Face cache | Yes | Transactional configuration change |
-| WSL distributions | Yes, per distribution | WSL 2 transactional VHD export/import; WSL 1 manual |
-| Docker Desktop data | Yes | Docker-managed data-root migration, manual for now |
-| Visual Studio | Yes | Installer-managed reinstall/configuration, manual for now |
-| VS Code extensions | Yes | Dedicated configuration provider pending |
 
 ## Commands
 
-- `scan`: inventories supported locations and reports size, risk and strategy. WSL distributions report unknown size rather than relying on undocumented VHD paths.
-- `plan`: creates and journals a complete migration review plan without changing the machine.
-- `plan --safe`: creates a journal containing only currently executable provider-backed operations.
-- `doctor`: reports detected development tooling and the strategy required to cleanly relocate it.
+- `scan`: inventories supported locations and reports risk/strategy.
+- `plan`: creates and journals a complete review plan.
+- `plan --safe`: journals only currently executable provider-backed operations.
+- `doctor`: reports detected tooling and required relocation strategy.
 - `apply <id>`: dry-runs a stored plan.
-- `apply <id> --execute`: executes a safe plan through the staged provider lifecycle.
-- `rollback <id>`: currently reports status only; persistent cross-process rollback is the next journal increment.
+- `apply <id> --execute`: executes a safe plan through the staged lifecycle.
+- `rollback <id>`: persistent cross-process rollback remains pending; active `apply` rollback is automatic.
 
 ## Design documentation
 
