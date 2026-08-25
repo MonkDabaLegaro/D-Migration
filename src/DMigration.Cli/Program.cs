@@ -19,10 +19,20 @@ var configuredDirectoryProvider = new ConfiguredDirectoryMigrationProvider(
         new ConfiguredDirectoryRule("huggingface-cache", "HF_HOME")
     ]);
 
+var knownFolderProvider = new KnownFolderMigrationProvider(
+    new WindowsKnownFolderMigrationHost(),
+    [
+        new KnownFolderRule("downloads", KnownFolderIds.Downloads),
+        new KnownFolderRule("documents", KnownFolderIds.Documents),
+        new KnownFolderRule("pictures", KnownFolderIds.Pictures),
+        new KnownFolderRule("videos", KnownFolderIds.Videos),
+        new KnownFolderRule("music", KnownFolderIds.Music)
+    ]);
+
 var inventoryService = new InventoryService(providers);
 var planningService = new PlanningService();
 var journal = new JsonJournalStore(destinationDrive);
-var executionService = new ExecutionService(journal, [configuredDirectoryProvider]);
+var executionService = new ExecutionService(journal, [configuredDirectoryProvider, knownFolderProvider]);
 var doctorService = new DoctorService();
 
 var command = args.FirstOrDefault()?.ToLowerInvariant() ?? "interactive";
