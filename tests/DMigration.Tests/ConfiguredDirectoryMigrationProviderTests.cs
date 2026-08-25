@@ -38,20 +38,25 @@ public sealed class ConfiguredDirectoryMigrationProviderTests
     public async Task Rollback_RestoresOriginalConfigurationAndSource()
     {
         var host = new FakeHost();
-        host.Directories[@"D:\Datos\AI\Ollama"] = new Dictionary<string, long> { ["model.bin"] = 100 };
-        host.UserEnvironment["OLLAMA_MODELS"] = @"D:\Datos\AI\Ollama";
+        host.Directories[@"C:\Users\me\.ollama\models"] = new Dictionary<string, long> { ["model.bin"] = 100 };
+        host.UserEnvironment["OLLAMA_MODELS"] = @"C:\Users\me\.ollama\models";
         var provider = new ConfiguredDirectoryMigrationProvider(
             host,
             [new ConfiguredDirectoryRule("ollama-models", "OLLAMA_MODELS")]);
         var item = Item("ollama-models", @"C:\Users\me\.ollama\models", @"D:\Datos\AI\Ollama");
         var step = new MigrationStep("step", item, item.RecommendedDestination);
 
-        provider.RememberOriginalConfigurationForTesting(step.Id, @"C:\Users\me\.ollama\models");
+        Assert.True((await provider.PreflightAsync(step)).Success);
+        Assert.True((await provider.StageAsync(step)).Success);
+        Assert.True((await provider.SwitchAsync(step)).Success);
+        host.DeleteDirectory(item.SourcePath);
+
         var result = await provider.RollbackAsync(step);
 
         Assert.True(result.Success);
         Assert.Equal(@"C:\Users\me\.ollama\models", host.UserEnvironment["OLLAMA_MODELS"]);
         Assert.True(host.Directories.ContainsKey(@"C:\Users\me\.ollama\models"));
+        Assert.True(host.Directories.ContainsKey(@"D:\Datos\AI\Ollama"));
     }
 
     private static InventoryItem Item(string id, string source, string destination) => new(
