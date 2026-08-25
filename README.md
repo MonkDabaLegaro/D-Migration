@@ -31,6 +31,7 @@ D-Migration is intentionally conservative:
 - unsupported migrations are marked manual/non-executable;
 - executable migration follows `preflight -> stage -> switch -> validate -> commit`;
 - staging copies data while preserving the source;
+- validation compares relative paths, file sizes and SHA-256 content hashes;
 - source deletion happens only in commit, after configuration and copied contents have been validated;
 - failures after switch trigger automatic rollback during the same `apply` execution;
 - rollback restores the original user configuration and recreates the source if needed while preserving the destination copy;
@@ -82,7 +83,7 @@ The first real migration provider handles regenerable caches whose owning tool s
 | Visual Studio | Visual Studio Installer provider required | No |
 | VS Code extensions | Dedicated configuration provider required | No |
 
-For an automatic directory migration D-Migration verifies available destination space, refuses a pre-existing destination, copies without deleting the source, changes the owning configuration, compares relative file names and sizes, and only then removes the source.
+For an automatic directory migration D-Migration verifies available destination space, refuses a pre-existing destination, copies without deleting the source, changes the owning configuration, verifies each copied file by relative path, length and SHA-256 hash, and only then removes the source.
 
 ## Default D: layout
 
