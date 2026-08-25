@@ -37,6 +37,7 @@ D-Migration is intentionally conservative:
 - WSL remains export/import-only and is not automatically moved yet;
 - Visual Studio remains installer-managed and is not automatically moved yet;
 - Docker Desktop remains provider-specific and is not automatically moved yet;
+- Ollama remains manual until its provider validates the runtime against the relocated model store;
 - administrator elevation is not requested globally.
 
 ## Quick start
@@ -67,14 +68,14 @@ Persistent/manual rollback across separate program executions is not enabled yet
 
 ## First executable providers
 
-The first real migration provider handles directories whose owning tool supports a user-level environment variable for relocating its data:
+The first real migration provider handles regenerable caches whose owning tool supports a user-level environment variable for relocating its data:
 
 | Item | Configuration switched by D-Migration | Automatic |
 |---|---|---:|
 | pip cache | `PIP_CACHE_DIR` | Yes |
 | npm cache | `NPM_CONFIG_CACHE` | Yes |
-| Ollama models | `OLLAMA_MODELS` | Yes, with Ollama stopped |
 | Hugging Face cache | `HF_HOME` | Yes |
+| Ollama models | `OLLAMA_MODELS`; runtime validation still required | No |
 | pnpm | Dedicated store provider still required | No |
 | Docker Desktop | Dedicated Docker provider required | No |
 | WSL distributions | Export/import provider required | No |
@@ -130,7 +131,7 @@ Set `DMIGRATION_DESTINATION_DRIVE` to use another destination drive.
 | pip cache | Yes | Transactional configuration change |
 | npm cache | Yes | Transactional configuration change |
 | pnpm data | Yes | Manual until store semantics are handled separately |
-| Ollama models | Yes | Transactional configuration change |
+| Ollama models | Yes | Configuration change plus runtime probe, manual for now |
 | Hugging Face cache | Yes | Transactional configuration change |
 | Docker Desktop data | Yes | Docker-managed data-root migration, manual for now |
 | WSL distributions | Yes | Export/import, manual for now |
