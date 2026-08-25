@@ -26,6 +26,12 @@ public sealed class WindowsKnownFolderProvider(string destinationDrive = "D:") :
             cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) continue;
 
+            var cloudManaged = KnownFolderPathSafety.IsCloudManaged(path);
+            var canExecute = OperatingSystem.IsWindows() && !cloudManaged;
+            var notes = cloudManaged
+                ? "Carpeta administrada por OneDrive u otro proveedor cloud; requiere revisión manual."
+                : "Carpeta conocida de Windows apta para redirección transaccional mediante Shell Known Folder API.";
+
             items.Add(new InventoryItem(
                 id,
                 Name,
@@ -33,11 +39,11 @@ public sealed class WindowsKnownFolderProvider(string destinationDrive = "D:") :
                 path,
                 DirectorySizer.TryGetSize(path),
                 category.ToLowerInvariant(),
-                RiskLevel.Low,
+                cloudManaged ? RiskLevel.Medium : RiskLevel.Low,
                 MigrationStrategy.KnownFolderRedirect,
                 DestinationLayout.For(destinationDrive, category, name),
-                false,
-                "Carpeta conocida de Windows. La migración debe usar redirección soportada; este incremento sólo genera el plan."));
+                canExecute,
+                notes));
         }
 
         return Task.FromResult<IReadOnlyList<InventoryItem>>(items);
