@@ -11,7 +11,7 @@ src/
   DMigration.Domain/                  Core records, policies and destination layout
   DMigration.Application/             Inventory, planning, doctor and execution use-cases
   DMigration.Infrastructure.Windows/  Windows known folders, filesystem and journal adapters
-  DMigration.Providers/               Developer-tool detection and technology policies
+  DMigration.Providers/               Developer-tool discovery and migration providers
   DMigration.Cli/                     Composition root and terminal UI
 
 tests/
@@ -29,13 +29,15 @@ D-Migration is intentionally conservative:
 - `scan` and `plan` never move or delete files;
 - dry-run is the default behavior;
 - unsupported migrations are marked manual/non-executable;
-- source deletion is not allowed before provider-specific validation;
-- WSL is classified for export/import rather than direct VHDX movement;
-- Visual Studio is treated as installer-managed software;
-- package-manager caches prefer official configuration over junctions;
+- executable migration follows `preflight -> stage -> switch -> validate -> commit`;
+- staging copies data while preserving the source;
+- source deletion happens only in commit, after configuration and copied contents have been validated;
+- failures after switch trigger automatic rollback during the same `apply` execution;
+- rollback restores the original user configuration and recreates the source if needed while preserving the destination copy;
+- WSL remains export/import-only and is not automatically moved yet;
+- Visual Studio remains installer-managed and is not automatically moved yet;
+- Docker Desktop remains provider-specific and is not automatically moved yet;
 - administrator elevation is not requested globally.
-
-The current increment keeps destructive execution disabled until providers implement their own preflight, validation and rollback contracts.
 
 ## Quick start
 
@@ -47,17 +49,39 @@ cd D-Migration
 .\run.ps1
 ```
 
-You can also invoke commands directly:
+Useful commands:
 
 ```powershell
 .\run.ps1 scan
 .\run.ps1 plan
+.\run.ps1 plan --safe
 .\run.ps1 doctor
 .\run.ps1 apply <plan-id>
+.\run.ps1 apply <safe-plan-id> --execute
 .\run.ps1 rollback <plan-id>
 ```
 
-`apply <plan-id>` is a dry-run unless `--execute` is explicitly provided. Even with `--execute`, the application rejects plans containing providers that are not yet safely executable.
+`plan` creates a complete review plan including manual items. `plan --safe` creates a separate plan containing only items that currently have an executable migration provider. `apply` is still a dry-run unless `--execute` is explicitly supplied.
+
+Persistent/manual rollback across separate program executions is not enabled yet. Automatic rollback during the active `apply` transaction is enabled.
+
+## First executable providers
+
+The first real migration provider handles directories whose owning tool supports a user-level environment variable for relocating its data:
+
+| Item | Configuration switched by D-Migration | Automatic |
+|---|---|---:|
+| pip cache | `PIP_CACHE_DIR` | Yes |
+| npm cache | `NPM_CONFIG_CACHE` | Yes |
+| Ollama models | `OLLAMA_MODELS` | Yes, with Ollama stopped |
+| Hugging Face cache | `HF_HOME` | Yes |
+| pnpm | Dedicated store provider still required | No |
+| Docker Desktop | Dedicated Docker provider required | No |
+| WSL distributions | Export/import provider required | No |
+| Visual Studio | Visual Studio Installer provider required | No |
+| VS Code extensions | Dedicated configuration provider required | No |
+
+For an automatic directory migration D-Migration verifies available destination space, refuses a pre-existing destination, copies without deleting the source, changes the owning configuration, compares relative file names and sizes, and only then removes the source.
 
 ## Default D: layout
 
@@ -98,28 +122,30 @@ D:\
 
 Set `DMIGRATION_DESTINATION_DRIVE` to use another destination drive.
 
-## Initial detection coverage
+## Detection coverage
 
 | Area | Detection | Strategy |
 |---|---|---|
-| Downloads/Documents/Pictures/Videos/Music | Yes | Windows known-folder redirect |
-| pip cache | Yes | Configuration change |
-| npm cache | Yes | Configuration change |
-| pnpm data | Yes | Configuration change |
-| Ollama models | Yes | Configuration change |
-| Hugging Face cache | Yes | Configuration change |
-| Docker Desktop data | Yes | Docker-managed data-root migration |
-| WSL distributions | Yes | Export/import |
-| Visual Studio | Yes | Installer-managed reinstall/configuration |
-| VS Code extensions | Yes | Configuration change |
+| Downloads/Documents/Pictures/Videos/Music | Yes | Windows known-folder redirect, manual for now |
+| pip cache | Yes | Transactional configuration change |
+| npm cache | Yes | Transactional configuration change |
+| pnpm data | Yes | Manual until store semantics are handled separately |
+| Ollama models | Yes | Transactional configuration change |
+| Hugging Face cache | Yes | Transactional configuration change |
+| Docker Desktop data | Yes | Docker-managed data-root migration, manual for now |
+| WSL distributions | Yes | Export/import, manual for now |
+| Visual Studio | Yes | Installer-managed reinstall/configuration, manual for now |
+| VS Code extensions | Yes | Dedicated configuration provider pending |
 
 ## Commands
 
 - `scan`: inventories supported locations and reports size, risk and strategy.
-- `plan`: creates and journals a migration plan without changing the machine.
+- `plan`: creates and journals a complete migration review plan without changing the machine.
+- `plan --safe`: creates a journal containing only currently executable provider-backed operations.
 - `doctor`: reports detected development tooling and the strategy required to cleanly relocate it.
-- `apply`: validates a stored plan; actual mutation remains provider-gated.
-- `rollback`: reserved for journaled provider rollbacks once mutation providers are enabled.
+- `apply <id>`: dry-runs a stored plan.
+- `apply <id> --execute`: executes a safe plan through the staged provider lifecycle.
+- `rollback <id>`: currently reports status only; persistent cross-process rollback is the next journal increment.
 
 ## Design documentation
 
