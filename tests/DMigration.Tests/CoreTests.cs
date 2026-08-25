@@ -14,6 +14,17 @@ public sealed class CoreTests
     }
 
     [Fact]
+    public void DestinationLayout_SeparatesPicturesAndVideosInsideMediaRoot()
+    {
+        var pictures = DestinationLayout.For("D:", "pictures", "Fotos y videos");
+        var videos = DestinationLayout.For("D:", "videos", "Fotos y videos");
+
+        Assert.Equal(Path.Combine(@"D:\", "Fotos y videos", "Fotos"), pictures);
+        Assert.Equal(Path.Combine(@"D:\", "Fotos y videos", "Videos"), videos);
+        Assert.NotEqual(pictures, videos);
+    }
+
+    [Fact]
     public void PlanningService_ExcludesProtectedItems()
     {
         var item = new InventoryItem(
