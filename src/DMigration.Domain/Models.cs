@@ -39,7 +39,8 @@ public static class DestinationLayout
     {
         "downloads" => Path.Combine(Root(drive), "Descargas"),
         "documents" => Path.Combine(Root(drive), "Documentos"),
-        "pictures" or "videos" => Path.Combine(Root(drive), "Fotos y videos"),
+        "pictures" => Path.Combine(Root(drive), "Fotos y videos", "Fotos"),
+        "videos" => Path.Combine(Root(drive), "Fotos y videos", "Videos"),
         "music" => Path.Combine(Root(drive), "Musica"),
         "games" => Path.Combine(Root(drive), "Games", name),
         "python" => Path.Combine(Root(drive), "Librerias", "Python", name),
