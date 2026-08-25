@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console" Version="0.50.0" />
+    <ProjectReference Include="../DMigration.Domain/DMigration.Domain.csproj" />
+    <ProjectReference Include="../DMigration.Application/DMigration.Application.csproj" />
+    <ProjectReference Include="../DMigration.Infrastructure.Windows/DMigration.Infrastructure.Windows.csproj" />
+    <ProjectReference Include="../DMigration.Providers/DMigration.Providers.csproj" />
+  </ItemGroup>
+</Project>
